@@ -85,8 +85,11 @@ db_rujukan:   dict = {}
 _p = _v = _c = _r = 1
 
 def nid(prefix, counter_dict):
-    # helper buat ID
-    pass   # TODO: implementasikan seperti contoh di bawah
+    if prefix not in counter_dict:
+        counter_dict[prefix] = 1
+    current_val = counter_dict[prefix]
+    counter_dict[prefix] += 1
+    return f"{prefix}{current_val:04d}"
 
 _pc = 1
 def new_patient_id():
@@ -146,24 +149,70 @@ def root():
 @app.post("/patients", response_model=Patient,
           status_code=201, tags=["Pasien"])
 def daftarkan_pasien(data: PatientCreate):
-    # TODO: buat ID baru, simpan ke db_pasien, kembalikan objek Patient
-    pass
+    pid = new_patient_id()
+    pasien_baru = Patient(
+        id=pid,
+        **data.dict(),
+        terdaftar=datetime.now()
+    )
+    db_pasien[pid] = pasien_baru
+    return pasien_baru
 
 @app.get("/patients", response_model=List[Patient], tags=["Pasien"])
 def daftar_pasien():
-    # TODO: kembalikan semua pasien sebagai list
-    pass
+    return list(db_pasien.values())
 
 @app.get("/patients/{patient_id}", response_model=Patient, tags=["Pasien"])
 def ambil_pasien(patient_id: str):
-    # TODO: ambil satu pasien, raise 404 jika tidak ada
-    pass
+    if patient_id not in db_pasien:
+        raise HTTPException(status_code=404, detail=f"Pasien dengan ID {patient_id} tidak ditemukan")
+    return db_pasien[patient_id]
 
 @app.get("/fhir/Patient/{patient_id}", tags=["FHIR"])
 def fhir_patient(patient_id: str):
-    # TODO: kembalikan data pasien dalam format FHIR R4 Patient Resource
-    # Gunakan format kontrak dari Bab 2
-    pass
+    if patient_id not in db_pasien:
+        raise HTTPException(status_code=404, detail=f"Pasien dengan ID {patient_id} tidak ditemukan")
+    
+    p = db_pasien[patient_id]
+
+    fhir_resource = {
+        "resourceType": "Patient",
+        "id": p.id,
+        "active": True,
+        "identifier": [
+            {
+                "use": "official",
+                "system": "https://fhir.kemkes.go.id/id/nik",
+                "value": p.nik
+            }
+        ],
+        "name": [
+            {
+                "use": "official",
+                "text": f"{p.nama_depan} {p.nama_belakang}".strip(),
+                "family": p.nama_belakang,
+                "given": [p.nama_depan]
+            }
+        ],
+        "gender": p.jenis_kelamin.value,
+        "birthDate": str(p.tanggal_lahir),
+        "telecom": [
+            {
+                "system": "phone",
+                "value": p.telepon,
+                "use": "mobile"
+            }
+        ] if p.telepon else [],
+        "address": [
+            {
+                "use": "home",
+                "line": [p.alamat] if p.alamat else [],
+                "district": p.kecamatan if p.kecamatan else ""
+            }
+        ] if (p.alamat or p.kecamatan) else []
+    }
+    
+    return fhir_resource
 
 # ============================================================
 # ENDPOINT: TANDA VITAL
@@ -171,14 +220,24 @@ def fhir_patient(patient_id: str):
 @app.post("/vitals", response_model=Vital,
           status_code=201, tags=["Tanda Vital"])
 def catat_vital(data: VitalCreate):
-    # TODO: validasi patient_id ada, buat ID, simpan, kembalikan
-    pass
+    if data.patient_id not in db_pasien:
+        raise HTTPException(status_code=404, detail=f"Pasien dengan ID {data.patient_id} tidak ditemukan")
+    vid = new_vital_id()
+    vital_baru = Vital(
+        id=vid,
+        **data.dict(),
+        waktu=datetime.now()
+    )
+    db_vital[vid] = vital_baru
+    return vital_baru
 
 @app.get("/patients/{patient_id}/vitals",
          response_model=List[Vital], tags=["Tanda Vital"])
 def ambil_vital_pasien(patient_id: str):
-    # TODO: filter db_vital berdasarkan patient_id
-    pass
+    if patient_id not in db_pasien:
+        raise HTTPException(status_code=404, detail=f"Pasien dengan ID {patient_id} tidak ditemukan")
+    vitals_pasien = [v for v in db_vital.values() if v.patient_id == patient_id]
+    return vitals_pasien
 
 # ============================================================
 # ENDPOINT: DIAGNOSIS
@@ -186,8 +245,16 @@ def ambil_vital_pasien(patient_id: str):
 @app.post("/conditions", response_model=Condition,
           status_code=201, tags=["Diagnosis"])
 def catat_diagnosis(data: ConditionCreate):
-    # TODO: validasi patient_id ada, simpan kondisi
-    pass
+    if data.patient_id not in db_pasien:
+        raise HTTPException(status_code=404, detail=f"Pasien dengan ID {data.patient_id} tidak ditemukan")
+    cid = new_cond_id()
+    kondisi_baru = Condition(
+        id=cid,
+        **data.dict(),
+        recorded=datetime.now()
+    )
+    db_kondisi[cid] = kondisi_baru
+    return kondisi_baru
 
 # ============================================================
 # INTEGRASI 1: Kirim Rujukan ke Rumah Sakit (K2)

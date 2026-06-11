@@ -179,13 +179,10 @@ def root():
 @app.post("/patients", response_model=Patient,
           status_code=201, tags=["Pasien"])
 def admit_pasien(data: PatientCreate):
-    id = new_patient_id()
-    patient = Patient(id=new_patient_id(), terdaftar=datetime.now(), **data.dict())
-    db_pasien[id]=patient
+    pid = new_patient_id()
+    patient = Patient(id=pid, terdaftar=datetime.now(), **data.dict())
+    db_pasien[pid]=patient
     return patient
-
-    # # TODO: buat ID dengan new_patient_id(), bungkus jadi Patient,
-    # #       simpan ke db_pasien, lalu kembalikan objek Patient
 
 @app.get("/patients/{patient_id}", response_model=Patient, tags=["Pasien"])
 def ambil_pasien(patient_id: str):
@@ -193,6 +190,7 @@ def ambil_pasien(patient_id: str):
         raise HTTPException (status_code=404,
                              detail=f"Pasien '{patient_id}' tidak ditemukan")
     return db_pasien[patient_id]
+    
 
 @app.get("/fhir/Patient/{patient_id}", tags=["FHIR"])
 def fhir_patient(patient_id: str):
@@ -207,7 +205,8 @@ def fhir_patient(patient_id: str):
         "id": p.id,
         "identifier": [
             {"system ": "https://www.dukcapil.go.id", "value ": p.nik}],
-        "name": [{"use": "official", "family": p.nama_belakang,
+        "name": [{"use": "official", 
+                  "family": p.nama_belakang,
                   "given": p.nama_depan}],
         "gender": p.jenis_kelamin,
         "birthDate": str(p.tanggal_lahir)
@@ -221,8 +220,6 @@ def daftar_admissions():
         "pasien": list(db_pasien.values()),
         "rujukan": list(db_rujukan.values())
     }
-    # TODO: kembalikan rujukan yang masuk (db_rujukan) dan pasien
-    #       yang sudah di-admit (db_pasien)
 
 @app.post("/observations", status_code=201, tags=["Observasi"])
 def catat_observasi(data: ObservationCreate):
@@ -242,8 +239,6 @@ def catat_diagnosis(data: ConditionCreate):
     kondisi = Condition(id=cid, recorded=datetime.now(), **data.dict())
     db_kondisi[cid] = kondisi
     return kondisi
-    # TODO: validasi patient_id ada, buat ID dengan new_cond_id(),
-    #       simpan Condition ke db_kondisi, kembalikan
 
 @app.post("/medications", response_model=Medication,
           status_code=201, tags=["Resep"])
@@ -255,10 +250,6 @@ def tulis_resep(data: MedicationCreate):
     obat = Medication(id=mid, dibuat=datetime.now(), **data.dict())  
     db_meds[mid] = obat
     return obat
-    # TODO: validasi patient_id ada, buat ID dengan new_med_id(),
-    #       simpan Medication ke db_meds, kembalikan
-    #       (resep ini nanti dikirim ke apotek lewat /kirim-resep/{med_id})
-
 
 # ============================================================
 # [TERIMA] Rujukan masuk dari Puskesmas
