@@ -184,11 +184,6 @@ def admit_pasien(data: PatientCreate):
     db_pasien[id]=patient
     return patient
 
-
-    # # TODO: buat ID dengan new_patient_id(), bungkus jadi Patient,
-    # #       simpan ke db_pasien, lalu kembalikan objek Patient
-    # pass
-
 @app.get("/patients/{patient_id}", response_model=Patient, tags=["Pasien"])
 def ambil_pasien(patient_id: str):
     if patient_id not in db_pasien:
@@ -220,9 +215,6 @@ def daftar_admissions():
         "pasien": list(db_pasien.values()),
         "rujukan": list(db_rujukan.values())
     }
-    # TODO: kembalikan rujukan yang masuk (db_rujukan) dan pasien
-    #       yang sudah di-admit (db_pasien)
-    pass
 
 @app.post("/observations", status_code=201, tags=["Observasi"])
 def catat_observasi(data: ObservationCreate):
@@ -242,8 +234,6 @@ def catat_diagnosis(data: ConditionCreate):
     kondisi = Condition(id=cid, recorded=datetime.now(), **data.dict())
     db_kondisi[cid] = kondisi
     return kondisi
-    # TODO: validasi patient_id ada, buat ID dengan new_cond_id(),
-    #       simpan Condition ke db_kondisi, kembalikan
 
 @app.post("/medications", response_model=Medication,
           status_code=201, tags=["Resep"])
@@ -255,10 +245,6 @@ def tulis_resep(data: MedicationCreate):
     obat = Medication(id=mid, dibuat=datetime.now(), **data.dict())  
     db_meds[mid] = obat
     return obat
-    # TODO: validasi patient_id ada, buat ID dengan new_med_id(),
-    #       simpan Medication ke db_meds, kembalikan
-    #       (resep ini nanti dikirim ke apotek lewat /kirim-resep/{med_id})
-
 
 # ============================================================
 # [TERIMA] Rujukan masuk dari Puskesmas
