@@ -219,17 +219,29 @@ def catat_observasi(data: ObservationCreate):
 @app.post("/conditions", response_model=Condition,
           status_code=201, tags=["Diagnosis"])
 def catat_diagnosis(data: ConditionCreate):
+    if data.patient_id not in db_pasien:
+        raise HTTPException(status_code=404, detail="Pasien tidak ditemukan")
+    cid = new_cond_id()
+    kondisi = Condition(id=cid, recorded=datetime.now(), **data.dict())
+    db_kondisi[cid] = kondisi
+    return kondisi
     # TODO: validasi patient_id ada, buat ID dengan new_cond_id(),
     #       simpan Condition ke db_kondisi, kembalikan
-    pass
 
 @app.post("/medications", response_model=Medication,
           status_code=201, tags=["Resep"])
 def tulis_resep(data: MedicationCreate):
+    if data.patient_id not in db_pasien:
+        raise HTTPException(status_code=404,
+            detail=f"Pasien '{data.patient_id}' tidak ditemukan")
+    mid = new_med_id()
+    obat = Medication(id=mid, dibuat=datetime.now(), **data.dict())  
+    db_meds[mid] = obat
+    return obat
     # TODO: validasi patient_id ada, buat ID dengan new_med_id(),
     #       simpan Medication ke db_meds, kembalikan
     #       (resep ini nanti dikirim ke apotek lewat /kirim-resep/{med_id})
-    pass
+
 
 # ============================================================
 # [TERIMA] Rujukan masuk dari Puskesmas
