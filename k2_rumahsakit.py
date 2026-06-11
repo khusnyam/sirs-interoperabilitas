@@ -179,9 +179,9 @@ def root():
 @app.post("/patients", response_model=Patient,
           status_code=201, tags=["Pasien"])
 def admit_pasien(data: PatientCreate):
-    id = new_patient_id()
-    patient = Patient(id=new_patient_id(), terdaftar=datetime.now(), **data.dict())
-    db_pasien[id]=patient
+    pid = new_patient_id()
+    patient = Patient(id=pid, terdaftar=datetime.now(), **data.dict())
+    db_pasien[pid]=patient
     return patient
 
 @app.get("/patients/{patient_id}", response_model=Patient, tags=["Pasien"])
@@ -189,11 +189,13 @@ def ambil_pasien(patient_id: str):
     if patient_id not in db_pasien:
         raise HTTPException (status_code=404,
                              detail=f"Pasien '{patient_id}' tidak ditemukan")
+    return db_pasien[patient_id]
+    
 
 @app.get("/fhir/Patient/{patient_id}", tags=["FHIR"])
 def fhir_patient(patient_id: str):
     if patient_id not in db_pasien :
-        raise HTTPException ( status_code =404 ,
+        raise HTTPException ( status_code=404 ,
                              detail = f"Pasien ’{patient_id}’ tidak ditemukan")
     p = db_pasien[patient_id]
     return {
@@ -201,7 +203,8 @@ def fhir_patient(patient_id: str):
         "id": p.id,
         "identifier": [
             {"system ": "https://www.dukcapil.go.id", "value ": p.nik}],
-        "name": [{"use": "official", "family": p.nama_belakang,
+        "name": [{"use": "official", 
+                  "family": p.nama_belakang,
                   "given": p.nama_depan}],
         "gender": p.jenis_kelamin,
         "birthDate": str(p.tanggal_lahir)
