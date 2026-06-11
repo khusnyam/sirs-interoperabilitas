@@ -184,22 +184,23 @@ def admit_pasien(data: PatientCreate):
     db_pasien[id]=patient
     return patient
 
-
     # # TODO: buat ID dengan new_patient_id(), bungkus jadi Patient,
     # #       simpan ke db_pasien, lalu kembalikan objek Patient
-    # pass
 
 @app.get("/patients/{patient_id}", response_model=Patient, tags=["Pasien"])
 def ambil_pasien(patient_id: str):
     if patient_id not in db_pasien:
         raise HTTPException (status_code=404,
                              detail=f"Pasien '{patient_id}' tidak ditemukan")
+    return db_pasien[patient_id]
 
 @app.get("/fhir/Patient/{patient_id}", tags=["FHIR"])
 def fhir_patient(patient_id: str):
     if patient_id not in db_pasien :
-        raise HTTPException ( status_code =404 ,
-                             detail = f"Pasien ’{patient_id}’ tidak ditemukan")
+        raise HTTPException ( 
+            status_code =404,
+            detail = f"Pasien ’{patient_id}’ tidak ditemukan"
+        )
     p = db_pasien[patient_id]
     return {
         "resourceType": "Patient", 
@@ -222,7 +223,6 @@ def daftar_admissions():
     }
     # TODO: kembalikan rujukan yang masuk (db_rujukan) dan pasien
     #       yang sudah di-admit (db_pasien)
-    pass
 
 @app.post("/observations", status_code=201, tags=["Observasi"])
 def catat_observasi(data: ObservationCreate):

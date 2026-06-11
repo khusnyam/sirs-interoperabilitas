@@ -83,29 +83,86 @@ def semua_laporan(sumber: Optional[str] = None,
 
 @app.get("/dashboard", tags=["Dashboard"])
 def dashboard():
-    # TODO: hitung statistik agregat dari db_laporan dan kembalikan, mis.
-    #       total_kasus, kasus_dirujuk, kasus_rawat_inap, rata_usia,
-    #       gender_male, gender_female, dan periode (tanggal pertama/terakhir).
-    #       Tangani kasus belum ada laporan (kembalikan total 0).
-    pass
+    laporan = list(db_laporan.values())
+
+    if not laporan:
+        return {
+            "total_kasus": 0,
+            "kasus_dirujuk": 0,
+            "kasus_rawat_inap": 0,
+            "rata_usia": 0,
+            "gender_male": 0,
+            "gender_female": 0,
+            "periode": {
+                "pertama": None,
+                "terakhir": None
+            }
+        }
+
+    tanggal_list = sorted(l.tanggal for l in laporan)
+
+    return {
+        "total_kasus": len(laporan),
+        "kasus_dirujuk": sum(1 for l in laporan if l.dirujuk),
+        "kasus_rawat_inap": sum(1 for l in laporan if l.rawat_inap),
+        "rata_usia": round(sum(l.usia for l in laporan) / len(laporan), 1),
+        "gender_male": sum(1 for l in laporan if l.jenis_kelamin.lower() in ("l", "laki-laki", "male")),
+        "gender_female": sum(1 for l in laporan if l.jenis_kelamin.lower() in ("p", "perempuan", "female")),
+        "periode": {
+            "pertama": tanggal_list[0],
+            "terakhir": tanggal_list[-1]
+        }
+    }
 
 @app.get("/dashboard/per-icd10", tags=["Dashboard"])
 def per_icd10():
-    # TODO: kelompokkan db_laporan berdasarkan diagnosis_icd10 dan hitung
-    #       jumlah tiap diagnosis (gunakan defaultdict). Kembalikan list.
-    pass
+    hitung = defaultdict(lambda: {"jumlah": 0, "diagnosis_display": ""})
+
+    for l in db_laporan.values():
+        hitung[l.diagnosis_icd10]["jumlah"] += 1
+        hitung[l.diagnosis_icd10]["diagnosis_display"] = l.diagnosis_display
+
+    return [
+        {
+            "icd10": kode,
+            "diagnosis_display": data["diagnosis_display"],
+            "jumlah": data["jumlah"]
+        }
+        for kode, data in sorted(hitung.items(), key=lambda x: -x[1]["jumlah"])
+    ]
 
 @app.get("/dashboard/per-kecamatan", tags=["Dashboard"])
 def per_kecamatan():
-    # TODO: kelompokkan db_laporan berdasarkan kecamatan, hitung jumlahnya
-    pass
+    hitung = defaultdict(int)
+
+    for l in db_laporan.values():
+        hitung[l.kecamatan] += 1
+
+    return [
+        {"kecamatan": kec, "jumlah": jumlah}
+        for kec, jumlah in sorted(hitung.items(), key=lambda x: -x[1])
+    ]
 
 @app.get("/dashboard/per-sumber", tags=["Dashboard"])
 def per_sumber():
-    # TODO: kelompokkan db_laporan berdasarkan sumber (faskes pengirim)
-    pass
+    hitung = defaultdict(int)
+
+    for l in db_laporan.values():
+        hitung[l.sumber] += 1
+
+    return [
+        {"sumber": sumber, "jumlah": jumlah}
+        for sumber, jumlah in sorted(hitung.items(), key=lambda x: -x[1])
+    ]
 
 @app.get("/dashboard/tren-harian", tags=["Dashboard"])
 def tren_harian():
-    # TODO: hitung jumlah kasus baru per tanggal, urutkan berdasarkan tanggal
-    pass
+    hitung = defaultdict(int)
+
+    for l in db_laporan.values():
+        hitung[l.tanggal] += 1
+
+    return [
+        {"tanggal": tgl, "jumlah": jumlah}
+        for tgl, jumlah in sorted(hitung.items())
+    ]
