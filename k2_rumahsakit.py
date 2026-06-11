@@ -194,27 +194,44 @@ def ambil_pasien(patient_id: str):
     if patient_id not in db_pasien:
         raise HTTPException (status_code=404,
                              detail=f"Pasien '{patient_id}' tidak ditemukan")
-    # # TODO: ambil satu pasien dari db_pasien, raise 404 jika tidak ada
-    # pass
 
 @app.get("/fhir/Patient/{patient_id}", tags=["FHIR"])
 def fhir_patient(patient_id: str):
-    # TODO: kembalikan data pasien dalam format FHIR R4 Patient Resource
-    #       (resourceType "Patient", identifier NIK, name, gender, birthDate).
-    #       Raise 404 jika pasien tidak ada. Lihat kontrak di Bab 2.
-    pass
+    if patient_id not in db_pasien :
+        raise HTTPException ( status_code =404 ,
+                             detail = f"Pasien ’{patient_id}’ tidak ditemukan")
+    p = db_pasien[patient_id]
+    return {
+        "resourceType": "Patient", 
+        "id": p.id,
+        "identifier": [
+            {"system ": "https://www.dukcapil.go.id", "value ": p.nik}],
+        "name": [{"use": "official", "family": p.nama_belakang,
+                  "given": p.nama_depan}],
+        "gender": p.jenis_kelamin,
+        "birthDate": str(p.tanggal_lahir)
+    }
 
 @app.get("/admissions", tags=["Pasien"])
 def daftar_admissions():
+    return {
+        "total_pasien": len(db_pasien),
+        "total_rujukan_masuk": len(db_rujukan),
+        "pasien": list(db_pasien.values()),
+        "rujukan": list(db_rujukan.values())
+    }
     # TODO: kembalikan rujukan yang masuk (db_rujukan) dan pasien
     #       yang sudah di-admit (db_pasien)
     pass
 
 @app.post("/observations", status_code=201, tags=["Observasi"])
 def catat_observasi(data: ObservationCreate):
-    # TODO: validasi patient_id ada, buat ID dengan new_obs_id(),
-    #       simpan Observation ke db_observations, kembalikan
-    pass
+    if data.patient_id not in db_pasien:
+        raise HTTPException(status_code=404, detail="Pasien tidak ditemukan")
+    oid = new_obs_id()
+    obs = Observation(id=oid, waktu=datetime.now(), **data.dict())
+    db_observations[oid] = obs
+    return obs
 
 @app.post("/conditions", response_model=Condition,
           status_code=201, tags=["Diagnosis"])
