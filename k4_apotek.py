@@ -6,205 +6,224 @@ from enum import Enum
 import requests
 from config import K2_URL
 
-app = FastAPI(title="SILab Prodia", version="1.0.0")
+app = FastAPI(title="SIApotek Kimia Farma", version="1.0.0")
 
-class OrderStatus(str, Enum):
-    received   = "received"
+class DispenseStatus(str, Enum):
+    waiting    = "waiting"
     processing = "processing"
     completed  = "completed"
-    sent       = "sent"
+    confirmed  = "confirmed"
 
-class Interpretasi(str, Enum):
-    normal   = "N"
-    high     = "H"
-    low      = "L"
-    critical = "CR"
+# ---- Stok Obat ----
+class StokObat(BaseModel):
+    nama_obat: str
+    kode_obat: Optional[str] = None
+    satuan: str = "tablet"
+    jumlah: int
+    harga_satuan: Optional[float] = None
 
-# ---- Incoming order dari RS ----
-class IncomingLabOrder(BaseModel):
+# ---- Resep masuk dari RS ----
+class IncomingPrescription(BaseModel):
     resourceType: str
     id: str
     status: str
+    medicationCodeableConcept: dict
     subject: dict
     requester: Optional[dict] = None
-    orderDetail: Optional[List[dict]] = []
-    note: Optional[List[dict]] = []
+    dosageInstruction: Optional[List[dict]] = []
+    dispenseRequest: Optional[dict] = None
 
-# ---- Hasil satu parameter pemeriksaan ----
-class HasilItem(BaseModel):
-    nama: str
-    nilai: float
-    satuan: str
-    nilai_normal_min: Optional[float] = None
-    nilai_normal_max: Optional[float] = None
-    interpretasi: Interpretasi
-
-# ---- Hasil lengkap satu order ----
-class HasilCreate(BaseModel):
-    order_id: str
-    items: List[HasilItem]
-    kesimpulan: str
-    analis: str = "Laboran Prodia"
-
-class Hasil(HasilCreate):
+# ---- Dispense ----
+class Dispense(BaseModel):
     id: str
+    resep_id: str
+    nama_obat: str
     patient_id: str
-    dibuat: datetime
+    jumlah: int
+    satuan: str
+    status: DispenseStatus
+    waktu: datetime
+    apoteker: str = "apt-sari-dewi"
 
 # ============================================================
 # DATABASE SEMENTARA
 # ============================================================
-db_orders: dict = {}
-db_hasil:  dict = {}
-_hc = 1
+db_stok:    dict = {}
+db_resep:   dict = {}
+db_dispense:dict = {}
+_dc = 1
 
-def new_hasil_id():
-    global _hc
-    hid = f"LAB-H{_hc:04d}"
-    _hc += 1
-    return hid
+def new_disp_id():
+    global _dc
+    did = f"APT-D{_dc:04d}"
+    _dc += 1
+    return did
+
+# Seed: stok awal obat untuk kasus Hendra
+_stok_awal = [
+    StokObat(nama_obat="Aspirin 100 mg", kode_obat="ASP100",
+             jumlah=500, harga_satuan=500),
+    StokObat(nama_obat="Bisoprolol 5 mg", kode_obat="BIS5",
+             jumlah=300, harga_satuan=2500),
+    StokObat(nama_obat="Atorvastatin 40 mg", kode_obat="ATV40",
+             jumlah=200, harga_satuan=3500),
+    StokObat(nama_obat="Furosemide 40 mg", kode_obat="FUR40",
+             jumlah=400, harga_satuan=1500),
+]
+for s in _stok_awal:
+    db_stok[s.nama_obat.lower()] = s
 
 # ============================================================
 # ENDPOINTS
 # ============================================================
-
 @app.get("/", tags=["Info"])
 def root():
-    pending = sum(1 for o in db_orders.values()
-                  if o.get("status_local") != "sent")
-    return {"sistem": "SILab Prodia", "total_order": len(db_orders),
-            "pending_hasil": pending}
+    return {"sistem": "SIApotek Kimia Farma",
+            "total_jenis_obat": len(db_stok),
+            "resep_pending": sum(1 for r in db_resep.values()
+                                 if r.get("status_local") == "waiting")}
 
-# [TERIMA] Order lab dari RS
-@app.post("/fhir/ServiceRequest", tags=["Integrasi"])
-def terima_order(order: IncomingLabOrder):
-    """Menerima order pemeriksaan lab dari Rumah Sakit."""
-    data = order.dict()
-    data["status_local"] = "received"
+@app.get("/stok", tags=["Stok"])
+def daftar_stok():
+    return list(db_stok.values())
+
+@app.get("/stok/{nama_obat}", tags=["Stok"])
+def cek_stok(nama_obat: str):
+    key = nama_obat.lower()
+    if key not in db_stok:
+        raise HTTPException(status_code=404,
+            detail=f"Obat '{nama_obat}' tidak ditemukan di stok")
+    return db_stok[key]
+
+@app.post("/stok", status_code=201, tags=["Stok"])
+def tambah_stok(data: StokObat):
+    key = data.nama_obat.lower()
+    if key in db_stok:
+        db_stok[key].jumlah += data.jumlah
+    else:
+        db_stok[key] = data
+    return db_stok[key]
+
+# [TERIMA] Resep dari RS
+@app.post("/fhir/MedicationRequest", tags=["Integrasi"])
+def terima_resep(resep: IncomingPrescription):
+    """Menerima resep dari Rumah Sakit."""
+    data = resep.dict()
+    data["status_local"] = "waiting"
     data["diterima"] = str(datetime.now())
-    db_orders[order.id] = data
+    db_resep[resep.id] = data
     return {
         "status": "received",
-        "order_id": order.id,
-        "pesan": f"Order {order.id} diterima, sedang diproses"
+        "resep_id": resep.id,
+        "pesan": "Resep diterima, menunggu proses dispensing"
     }
 
-@app.get("/orders", tags=["Order"])
-def daftar_order():
-    return list(db_orders.values())
+@app.get("/resep", tags=["Resep"])
+def daftar_resep():
+    return list(db_resep.values())
 
-@app.get("/orders/{order_id}", tags=["Order"])
-def ambil_order(order_id: str):
-    if order_id not in db_orders:
+@app.get("/resep/{resep_id}", tags=["Resep"])
+def ambil_resep(resep_id: str):
+    if resep_id not in db_resep:
         raise HTTPException(status_code=404,
-            detail=f"Order '{order_id}' tidak ditemukan")
-    return db_orders[order_id]
+            detail=f"Resep '{resep_id}' tidak ditemukan")
+    return db_resep[resep_id]
 
-@app.post("/results", status_code=201, tags=["Hasil"])
-def input_hasil(data: HasilCreate):
-    # Validasi order ada
-    if data.order_id not in db_orders:
+@app.post("/dispense/{resep_id}", status_code=201, tags=["Dispense"])
+def proses_dispense(resep_id: str):
+    # 1. Validasi resep ada
+    if resep_id not in db_resep:
         raise HTTPException(status_code=404,
-            detail=f"Order '{data.order_id}' tidak ditemukan")
+            detail=f"Resep '{resep_id}' tidak ditemukan")
 
-    # Ambil patient_id dari subject.reference order
-    order = db_orders[data.order_id]
-    patient_id = order.get("subject", {}).get("reference", "")
+    resep = db_resep[resep_id]
 
-    # Buat dan simpan hasil
-    hid = new_hasil_id()
-    hasil = Hasil(
-        id=hid,
+    # 2. Ambil nama obat & jumlah dari payload resep
+    nama_obat = resep.get("medicationCodeableConcept", {}).get("text", "")
+    dispense_req = resep.get("dispenseRequest") or {}
+    qty_obj = dispense_req.get("quantity") or {}
+    jumlah_diminta = int(qty_obj.get("value", 1))
+    satuan = qty_obj.get("unit", "tablet")
+    patient_ref = resep.get("subject", {}).get("reference", "")
+    patient_id = patient_ref.split("/")[-1]
+
+    # 3. Validasi stok
+    key = nama_obat.lower()
+    if key not in db_stok:
+        raise HTTPException(status_code=409,
+            detail=f"Obat '{nama_obat}' tidak ada di stok")
+    if db_stok[key].jumlah < jumlah_diminta:
+        raise HTTPException(status_code=409,
+            detail=f"Stok '{nama_obat}' tidak mencukupi "
+                   f"(tersisa {db_stok[key].jumlah}, diminta {jumlah_diminta})")
+
+    # 4. Kurangi stok, buat dispense, simpan
+    db_stok[key].jumlah -= jumlah_diminta
+    did = new_disp_id()
+    dispense = Dispense(
+        id=did,
+        resep_id=resep_id,
+        nama_obat=nama_obat,
         patient_id=patient_id,
-        dibuat=datetime.now(),
-        **data.dict()
+        jumlah=jumlah_diminta,
+        satuan=satuan,
+        status=DispenseStatus.completed,
+        waktu=datetime.now()
     )
-    db_hasil[hid] = hasil
+    db_dispense[did] = dispense
+    db_resep[resep_id]["status_local"] = "completed"
+    return dispense
 
-    # Update status order
-    db_orders[data.order_id]["status_local"] = "completed"
-
-    return hasil
-
-@app.get("/results", response_model=List[Hasil], tags=["Hasil"])
-def daftar_hasil():
-    return list(db_hasil.values())
-
-@app.get("/results/{order_id}", tags=["Hasil"])
-def hasil_per_order(order_id: str):
-    hasil_list = [h for h in db_hasil.values() if h.order_id == order_id]
-    if not hasil_list:
+# [INTEGRASI] Kirim konfirmasi dispense ke RS (K2)
+@app.post("/kirim-konfirmasi/{dispense_id}", tags=["Integrasi"])
+def kirim_konfirmasi(dispense_id: str):
+    """Konfirmasi ke RS bahwa obat sudah diserahkan ke pasien."""
+    if dispense_id not in db_dispense:
         raise HTTPException(status_code=404,
-            detail=f"Belum ada hasil untuk order '{order_id}'")
-    return hasil_list[0]
+            detail=f"Record dispense '{dispense_id}' tidak ditemukan")
 
-# [INTEGRASI] Kirim hasil ke RS (K2)
-@app.post("/kirim-hasil/{order_id}", tags=["Integrasi"])
-def kirim_hasil_ke_rs(order_id: str):
-    """
-    Mengirim DiagnosticReport ke Rumah Sakit setelah hasil jadi.
-    """
-    hasil_list = [h for h in db_hasil.values()
-                  if h.order_id == order_id]
-    if not hasil_list:
-        raise HTTPException(status_code=404,
-            detail=f"Belum ada hasil untuk order '{order_id}'")
-
-    h = hasil_list[0]
-    order = db_orders.get(order_id, {})
-    patient_ref = order.get("subject", {}).get("reference", "")
-
-    fhir_report = {
-        "resourceType": "DiagnosticReport",
-        "id": h.id,
-        "basedOn": [{"reference": f"ServiceRequest/{order_id}"}],
-        "status": "final",
-        "category": [{"coding": [{"system": "http://loinc.org",
-                                   "code": "11502-2",
-                                   "display": "Laboratory report"}]}],
-        "subject": {"reference": patient_ref},
-        "issued": str(h.dibuat),
-        "result": [
-            {"display": f"{item.nama}: {item.nilai} {item.satuan} "
-                        f"[{item.interpretasi}]"}
-            for item in h.items
-        ],
-        "conclusion": h.kesimpulan
+    d = db_dispense[dispense_id]
+    fhir_dispense = {
+        "resourceType": "MedicationDispense",
+        "id": dispense_id,
+        "basedOn": [{"reference": f"MedicationRequest/{d.resep_id}"}],
+        "status": "completed",
+        "medicationCodeableConcept": {"text": d.nama_obat},
+        "subject": {"reference": f"Patient/{d.patient_id}"},
+        "performer": [{"actor": {
+            "reference": "Organization/apotek-kimia-farma",
+            "display": "Apotek Kimia Farma Kaliurang"
+        }}],
+        "quantity": {"value": d.jumlah, "unit": d.satuan},
+        "whenHandedOver": str(d.waktu)
     }
 
     try:
-        resp = requests.post(f"{K2_URL}/fhir/DiagnosticReport",
-                             json=fhir_report, timeout=10)
+        resp = requests.post(f"{K2_URL}/fhir/MedicationDispense",
+                             json=fhir_dispense, timeout=10)
         resp.raise_for_status()
-        db_orders[order_id]["status_local"] = "sent"
-        return {"status": "hasil_terkirim", "rs_resp": resp.json()}
+        db_dispense[dispense_id].status = DispenseStatus.confirmed
+        return {"status": "konfirmasi_terkirim", "rs_resp": resp.json()}
     except Exception as e:
         return {"status": "gagal", "detail": str(e)}
 
-@app.get("/fhir/DiagnosticReport/{hasil_id}", tags=["FHIR"])
-def fhir_report(hasil_id: str):
-    if hasil_id not in db_hasil:
+@app.get("/fhir/MedicationDispense/{dispense_id}", tags=["FHIR"])
+def fhir_dispense(dispense_id: str):
+    if dispense_id not in db_dispense:
         raise HTTPException(status_code=404,
-            detail=f"Hasil '{hasil_id}' tidak ditemukan")
-
-    h = db_hasil[hasil_id]
-    order = db_orders.get(h.order_id, {})
-    patient_ref = order.get("subject", {}).get("reference", h.patient_id)
-
+            detail=f"Record dispense '{dispense_id}' tidak ditemukan")
+    d = db_dispense[dispense_id]
     return {
-        "resourceType": "DiagnosticReport",
-        "id": h.id,
-        "basedOn": [{"reference": f"ServiceRequest/{h.order_id}"}],
-        "status": "final",
-        "category": [{"coding": [{"system": "http://loinc.org",
-                                   "code": "11502-2",
-                                   "display": "Laboratory report"}]}],
-        "subject": {"reference": patient_ref},
-        "issued": str(h.dibuat),
-        "result": [
-            {"display": f"{item.nama}: {item.nilai} {item.satuan} "
-                        f"[{item.interpretasi}]"}
-            for item in h.items
-        ],
-        "conclusion": h.kesimpulan
+        "resourceType": "MedicationDispense",
+        "id": dispense_id,
+        "basedOn": [{"reference": f"MedicationRequest/{d.resep_id}"}],
+        "status": "completed",
+        "medicationCodeableConcept": {"text": d.nama_obat},
+        "subject": {"reference": f"Patient/{d.patient_id}"},
+        "performer": [{"actor": {
+            "reference": "Organization/apotek-kimia-farma",
+            "display": "Apotek Kimia Farma Kaliurang"
+        }}],
+        "quantity": {"value": d.jumlah, "unit": d.satuan},
+        "whenHandedOver": str(d.waktu)
     }
