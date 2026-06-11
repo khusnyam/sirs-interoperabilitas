@@ -102,21 +102,41 @@ def ambil_order(order_id: str):
 
 @app.post("/results", status_code=201, tags=["Hasil"])
 def input_hasil(data: HasilCreate):
-    # TODO: validasi data.order_id ada di db_orders (raise 404 jika tidak).
-    #       Buat ID dengan new_hasil_id(), ambil patient_id dari
-    #       subject.reference order, simpan Hasil ke db_hasil, dan
-    #       set status_local order menjadi "completed". Kembalikan Hasil.
-    pass
+    # Validasi order ada
+    if data.order_id not in db_orders:
+        raise HTTPException(status_code=404,
+            detail=f"Order '{data.order_id}' tidak ditemukan")
+
+    # Ambil patient_id dari subject.reference order
+    order = db_orders[data.order_id]
+    patient_id = order.get("subject", {}).get("reference", "")
+
+    # Buat dan simpan hasil
+    hid = new_hasil_id()
+    hasil = Hasil(
+        id=hid,
+        patient_id=patient_id,
+        dibuat=datetime.now(),
+        **data.dict()
+    )
+    db_hasil[hid] = hasil
+
+    # Update status order
+    db_orders[data.order_id]["status_local"] = "completed"
+
+    return hasil
 
 @app.get("/results", response_model=List[Hasil], tags=["Hasil"])
 def daftar_hasil():
-    # TODO: kembalikan semua hasil (db_hasil) sebagai list
-    pass
+    return list(db_hasil.values())
 
 @app.get("/results/{order_id}", tags=["Hasil"])
 def hasil_per_order(order_id: str):
-    # TODO: cari hasil dengan order_id tersebut, raise 404 jika belum ada
-    pass
+    hasil_list = [h for h in db_hasil.values() if h.order_id == order_id]
+    if not hasil_list:
+        raise HTTPException(status_code=404,
+            detail=f"Belum ada hasil untuk order '{order_id}'")
+    return hasil_list[0]
 
 # [INTEGRASI] Kirim hasil ke RS (K2)
 @app.post("/kirim-hasil/{order_id}", tags=["Integrasi"])
@@ -163,8 +183,28 @@ def kirim_hasil_ke_rs(order_id: str):
 
 @app.get("/fhir/DiagnosticReport/{hasil_id}", tags=["FHIR"])
 def fhir_report(hasil_id: str):
-    # TODO: kembalikan hasil lab dalam format FHIR R4 DiagnosticReport
-    #       (resourceType "DiagnosticReport", status "final", subject,
-    #       issued, result[], conclusion). Raise 404 jika hasil tidak ada.
-    #       Pola payload sama seperti yang dikirim di /kirim-hasil.
-    pass
+    if hasil_id not in db_hasil:
+        raise HTTPException(status_code=404,
+            detail=f"Hasil '{hasil_id}' tidak ditemukan")
+
+    h = db_hasil[hasil_id]
+    order = db_orders.get(h.order_id, {})
+    patient_ref = order.get("subject", {}).get("reference", h.patient_id)
+
+    return {
+        "resourceType": "DiagnosticReport",
+        "id": h.id,
+        "basedOn": [{"reference": f"ServiceRequest/{h.order_id}"}],
+        "status": "final",
+        "category": [{"coding": [{"system": "http://loinc.org",
+                                   "code": "11502-2",
+                                   "display": "Laboratory report"}]}],
+        "subject": {"reference": patient_ref},
+        "issued": str(h.dibuat),
+        "result": [
+            {"display": f"{item.nama}: {item.nilai} {item.satuan} "
+                        f"[{item.interpretasi}]"}
+            for item in h.items
+        ],
+        "conclusion": h.kesimpulan
+    }
