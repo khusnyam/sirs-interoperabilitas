@@ -158,6 +158,7 @@ _hendra = Patient(
     nama_depan="Hendra", nama_belakang="Kusuma",
     tanggal_lahir=date(1979, 5, 22),
     jenis_kelamin=Gender.male,
+    telepon="081234567899",
     sumber_rujukan="puskesmas-depok-3",
     terdaftar=datetime.now()
 )
